@@ -1,6 +1,8 @@
 
 <img src="./rewind.png" width="400px"></img>
 
+<img src="./fig9.png" width="400px"></img>
+
 ## ReWiND Reward - Pytorch (wip)
 
 Implementation of [ReWiND, "Language-Guided Rewards Teach Robot Policies without New Demonstrations"](https://rewind-reward.github.io/), from USC / Amazon Robotics
