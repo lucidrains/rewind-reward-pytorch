@@ -1,4 +1,5 @@
 from __future__ import annotations
+from itertools import chain
 
 import torch
 from torch import nn
@@ -85,6 +86,15 @@ class RewardModel(Module):
             dim = dim,
             dim_out = reward_bins,
             depth = mlp_predictor_depth
+        )
+
+    def parameters(self):
+        return chain(
+            self.encoder.parameters(),
+            self.video_embed.pos_emb.parameters(),
+            self.to_lang_tokens.parameters(),
+            self.to_video_tokens.parameters(),
+            self.mlp_predictor.parameters()
         )
 
     def forward(
