@@ -7,6 +7,35 @@
 
 Implementation of [ReWiND, "Language-Guided Rewards Teach Robot Policies without New Demonstrations"](https://rewind-reward.github.io/), from USC / Amazon Robotics
 
+## Install
+
+```bash
+$ pip install rewind-reward-pytorch
+```
+
+## Usage
+
+```python
+import torch
+from rewind_reward_pytorch import RewardModel
+
+reward_model = RewardModel(
+    reward_bins = 10
+)
+
+commands = [
+  'pick up the blue ball and put it in the red tray',
+  'pick up the red cube and put it in the green bin'
+]
+
+video = torch.rand(2, 3, 16, 224, 224)
+
+logits = reward_model(commands, video) # (2, 16, 10)
+
+assert logits.shape == (2, 16, 10)
+
+```
+
 ## Citations
 
 ```bibtex
