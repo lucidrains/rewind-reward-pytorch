@@ -30,6 +30,7 @@ dependencies = [
     "sentence_transformers",
     "transformers",
     "x-transformers",
+    "x-mlps-pytorch>=0.0.25",
     "vit-pytorch"
 ]
 
