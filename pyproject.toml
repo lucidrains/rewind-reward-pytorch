@@ -26,7 +26,11 @@ dependencies = [
     "einx>=0.3.0",
     "einops>=0.8.1",
     "torch>=2.4",
-    "x-transformers"
+    "pillow",
+    "sentence_transformers",
+    "transformers",
+    "x-transformers",
+    "vit-pytorch"
 ]
 
 [project.urls]
