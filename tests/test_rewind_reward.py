@@ -1,11 +1,17 @@
 import pytest
 import torch
 
-def test_rewind_reward():
+param = pytest.mark.parametrize
+
+@param('token_embed', (False, True))
+def test_rewind_reward(
+    token_embed
+):
     from rewind_reward_pytorch.rewind_reward import RewardModel
 
     reward_model = RewardModel(
-        reward_bins = 10
+        reward_bins = 10,
+        lang_per_token_embed = token_embed
     )
 
     commands = [

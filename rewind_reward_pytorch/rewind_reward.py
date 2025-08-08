@@ -2,8 +2,10 @@ from __future__ import annotations
 from itertools import chain
 
 import torch
-from torch import nn
+from torch import nn, tensor
 from torch.nn import Module
+import torch.nn.functional as F
+from torch.nn.utils.rnn import pad_sequence
 
 from x_transformers import Decoder, Encoder
 
@@ -11,11 +13,11 @@ from x_mlps_pytorch import Feedforwards
 
 from sentence_transformers import SentenceTransformer
 
-from PIL import Image
 from transformers import AutoImageProcessor, AutoModel
 
 from vit_pytorch.accept_video_wrapper import AcceptVideoWrapper
 
+import einx
 from einops import pack, unpack
 
 # helpers
@@ -58,9 +60,12 @@ class RewardModel(Module):
         reward_bins = 10,
         max_video_frames = 16,
         dim_image_embed = 768,
+        lang_per_token_embed = True,
         sentence_transformer_path = 'sentence-transformers/all-MiniLM-L12-v2'
     ):
         super().__init__()
+
+        self.lang_per_token_embed = lang_per_token_embed # whether to have token granularity
 
         self.mini_lm = SentenceTransformer(sentence_transformer_path)
         mini_lm_dim = self.mini_lm.encode(['__']).shape[-1]
@@ -91,7 +96,7 @@ class RewardModel(Module):
     def parameters(self):
         return chain(
             self.encoder.parameters(),
-            self.video_embed.pos_emb.parameters(),
+            iter((self.video_embed.pos_emb,)),
             self.to_lang_tokens.parameters(),
             self.to_video_tokens.parameters(),
             self.mlp_predictor.parameters()
@@ -102,13 +107,33 @@ class RewardModel(Module):
         commands: list[str],
         video, # (b c t h w)
     ):
+        assert len(commands) == video.shape[0]
+
         device = video.device
+        mask = None
 
-        lang_embeds_npy = self.mini_lm.encode(commands)
+        # language embed
 
-        lang_embeds = torch.from_numpy(lang_embeds_npy).to(device)
+        lang_embeds = self.mini_lm.encode(
+            commands,
+            output_value = 'token_embeddings' if self.lang_per_token_embed else 'sentence_embedding',
+            convert_to_numpy = False
+        )
+
+        lang_embeds = pad_sequence(lang_embeds, batch_first = True).to(device)
+
+        if self.lang_per_token_embed:
+            lens = tensor([t.shape[0] for t in lang_embeds], device = device)
+            seq = torch.arange(max(lens), device = device)
+
+            mask = einx.less('n, b -> b n', seq, lens)
+
+        # video embeds
 
         video_embeds = self.video_embed(video, eval_with_no_grad = True)
+
+        if self.lang_per_token_embed:
+            mask = F.pad(mask, (0, video_embeds.shape[1]), value = True)
 
         # linear projections
 
@@ -120,7 +145,7 @@ class RewardModel(Module):
 
         # attention
 
-        attended = self.encoder(tokens)
+        attended = self.encoder(tokens, mask = mask)
 
         # unpack and project the video tokens to logits to train reward predictor
 
