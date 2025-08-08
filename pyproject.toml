@@ -25,7 +25,7 @@ classifiers=[
 dependencies = [
     "einx>=0.3.0",
     "einops>=0.8.1",
-    "hl-gauss-pytorch>=0.1.22",
+    "hl-gauss-pytorch>=0.1.23",
     "sentence_transformers",
     "torch>=2.4",
     "transformers",
