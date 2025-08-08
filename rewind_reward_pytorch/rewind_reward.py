@@ -18,12 +18,17 @@ from transformers import AutoImageProcessor, AutoModel
 from vit_pytorch.accept_video_wrapper import AcceptVideoWrapper
 
 import einx
-from einops import pack, unpack
+from einops import rearrange, pack, unpack
 
 # helpers
 
 def exists(v):
     return v is not None
+
+def mask_from_lens(lens):
+    seq = torch.arange(lens.amax().item(), device = lens.device)
+    mask = einx.less('n, b -> b n', seq, lens)
+    return mask
 
 # their main proposal is just in Figure 9
 # basically the gist is predict progress from video frames for dense rewards
@@ -106,6 +111,8 @@ class RewardModel(Module):
         self,
         commands: list[str],
         video, # (b c t h w)
+        rewards = None,
+        video_lens = None
     ):
         assert len(commands) == video.shape[0]
 
@@ -124,9 +131,7 @@ class RewardModel(Module):
 
         if self.lang_per_token_embed:
             lens = tensor([t.shape[0] for t in lang_embeds], device = device)
-            seq = torch.arange(max(lens), device = device)
-
-            mask = einx.less('n, b -> b n', seq, lens)
+            mask = mask_from_lens(lens)
 
         # video embeds
 
@@ -153,4 +158,31 @@ class RewardModel(Module):
 
         video_frame_logits = self.mlp_predictor(attended_video_tokens)
 
-        return video_frame_logits
+        # return raw prediction or loss
+        # depending on whether `rewards` is passed in
+
+        return_loss = exists(rewards)
+
+        if not return_loss:
+            return video_frame_logits
+
+        # determine video masking for loss
+
+        if exists(video_lens):
+            video_mask = mask_from_lens(video_lens)
+
+            max_video_len = video_lens.amax().item()
+            video_frame_logits = video_frame_logits[:, :max_video_len]
+            rewards = rewards[:, :max_video_len]
+
+            rewards = einx.where('b t, b t,', video_mask, rewards, -1)
+
+        # calculate loss
+
+        loss = F.cross_entropy(
+            rearrange(video_frame_logits, 'b t l -> b l t'),
+            rewards,
+            ignore_index = -1
+        )
+
+        return loss
