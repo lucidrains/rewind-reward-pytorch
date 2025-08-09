@@ -20,7 +20,7 @@ from vit_pytorch.accept_video_wrapper import AcceptVideoWrapper
 from hl_gauss_pytorch import HLGaussLayer
 
 import einx
-from einops import rearrange, pack, unpack
+from einops import rearrange, repeat, pack, unpack
 
 # helpers
 
@@ -67,6 +67,7 @@ class RewardModel(Module):
         reward_bins = 10,
         max_video_frames = 16,
         dim_image_embed = 768,
+        num_register_tokens = 4, # register / memory tokens, can't hurt
         lang_per_token_embed = True,
         sentence_transformer_path = 'sentence-transformers/all-MiniLM-L12-v2',
         categorical_rewards = False,
@@ -105,6 +106,11 @@ class RewardModel(Module):
             depth = mlp_predictor_depth
         )
 
+        # register / memory / attention sink tokens
+
+        self.num_register_tokens = num_register_tokens
+        self.register_tokens = nn.Parameter(torch.randn(num_register_tokens, dim) * 1e-2)
+
         # whether to predict reward bins
 
         self.categorical_rewards = categorical_rewards
@@ -139,7 +145,8 @@ class RewardModel(Module):
         rewards = None,
         video_lens = None
     ):
-        assert len(commands) == video.shape[0]
+        batch = video.shape[0]
+        assert len(commands) == batch
 
         device = video.device
         mask = None
@@ -163,15 +170,17 @@ class RewardModel(Module):
         video_embeds = self.video_embed(video, eval_with_no_grad = True)
 
         if self.lang_per_token_embed:
-            mask = F.pad(mask, (0, video_embeds.shape[1]), value = True)
+            mask = F.pad(mask, (0, video_embeds.shape[1] + self.num_register_tokens), value = True)
 
         # linear projections
 
         lang_tokens = self.to_lang_tokens(lang_embeds)
 
+        register_tokens = repeat(self.register_tokens, 'n d -> b n d', b = batch)
+
         video_tokens = self.to_video_tokens(video_embeds)
 
-        tokens, lang_video_packed_shape = pack((lang_tokens, video_tokens), 'b * d')
+        tokens, lang_video_packed_shape = pack((lang_tokens, register_tokens, video_tokens), 'b * d')
 
         # attention
 
@@ -179,7 +188,7 @@ class RewardModel(Module):
 
         # unpack and project the video tokens to logits to train reward predictor
 
-        _, attended_video_tokens = unpack(attended, lang_video_packed_shape, 'b * d')
+        _, _, attended_video_tokens = unpack(attended, lang_video_packed_shape, 'b * d')
 
         video_frame_embed_or_logits = self.mlp_predictor(attended_video_tokens)
 
