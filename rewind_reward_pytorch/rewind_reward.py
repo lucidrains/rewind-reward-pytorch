@@ -128,7 +128,8 @@ class RewardModel(Module):
             iter((self.video_embed.pos_emb,)),
             self.to_lang_tokens.parameters(),
             self.to_video_tokens.parameters(),
-            self.mlp_predictor.parameters()
+            self.mlp_predictor.parameters(),
+            self.hl_gauss_layer.parameters()
         )
 
     def forward(
