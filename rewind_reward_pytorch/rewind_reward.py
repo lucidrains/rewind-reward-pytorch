@@ -17,6 +17,8 @@ from transformers import AutoImageProcessor, AutoModel
 
 from vit_pytorch.accept_video_wrapper import AcceptVideoWrapper
 
+from hl_gauss_pytorch import HLGaussLayer
+
 import einx
 from einops import rearrange, pack, unpack
 
@@ -66,7 +68,12 @@ class RewardModel(Module):
         max_video_frames = 16,
         dim_image_embed = 768,
         lang_per_token_embed = True,
-        sentence_transformer_path = 'sentence-transformers/all-MiniLM-L12-v2'
+        sentence_transformer_path = 'sentence-transformers/all-MiniLM-L12-v2',
+        categorical_rewards = False,
+        use_hl_gauss_loss = True,
+        reward_min_value = 0.,
+        reward_max_value = 5.,
+        reward_hl_gauss_loss_num_bins = 20,
     ):
         super().__init__()
 
@@ -94,8 +101,25 @@ class RewardModel(Module):
 
         self.mlp_predictor = Feedforwards(
             dim = dim,
-            dim_out = reward_bins,
+            dim_out = reward_bins if categorical_rewards else None,
             depth = mlp_predictor_depth
+        )
+
+        # whether to predict reward bins
+
+        self.categorical_rewards = categorical_rewards
+
+        # hl gauss loss or plain regression
+        # https://arxiv.org/abs/2403.03950
+
+        self.hl_gauss_layer = HLGaussLayer(
+            dim = dim,
+            use_regression = not use_hl_gauss_loss,
+            hl_gauss_loss = dict(
+                min_value = reward_min_value,
+                max_value = reward_max_value,
+                num_bins = reward_hl_gauss_loss_num_bins,
+            )
         )
 
     def parameters(self):
@@ -156,7 +180,26 @@ class RewardModel(Module):
 
         _, attended_video_tokens = unpack(attended, lang_video_packed_shape, 'b * d')
 
-        video_frame_logits = self.mlp_predictor(attended_video_tokens)
+        video_frame_embed_or_logits = self.mlp_predictor(attended_video_tokens)
+
+        # determine video masking for loss
+
+        if exists(video_lens):
+            video_mask = mask_from_lens(video_lens)
+            max_video_len = video_lens.amax().item()
+
+            video_frame_embed_or_logits = video_frame_embed_or_logits[:, :max_video_len]
+
+            if exists(rewards):
+                rewards = rewards[:, :max_video_len]
+                rewards = einx.where('b t, b t,', video_mask, rewards, -1)
+
+        # naming
+
+        if self.categorical_rewards:
+            video_frame_logits = video_frame_embed_or_logits
+        else:
+            video_frame_embeds = video_frame_embed_or_logits
 
         # return raw prediction or loss
         # depending on whether `rewards` is passed in
@@ -164,25 +207,24 @@ class RewardModel(Module):
         return_loss = exists(rewards)
 
         if not return_loss:
-            return video_frame_logits
-
-        # determine video masking for loss
-
-        if exists(video_lens):
-            video_mask = mask_from_lens(video_lens)
-
-            max_video_len = video_lens.amax().item()
-            video_frame_logits = video_frame_logits[:, :max_video_len]
-            rewards = rewards[:, :max_video_len]
-
-            rewards = einx.where('b t, b t,', video_mask, rewards, -1)
+            if self.categorical_rewards:
+                return video_frame_logits
+            else:
+                return self.hl_gauss_layer(video_frame_embeds)
 
         # calculate loss
 
-        loss = F.cross_entropy(
-            rearrange(video_frame_logits, 'b t l -> b l t'),
-            rewards,
-            ignore_index = -1
-        )
+        if self.categorical_rewards:
+            assert rewards.dtype in (torch.long, torch.int)
+
+            loss = F.cross_entropy(
+                rearrange(video_frame_logits, 'b t l -> b l t'),
+                rewards,
+                ignore_index = -1
+            )
+        else:
+            assert rewards.dtype == torch.float
+
+            loss = self.hl_gauss_layer(video_frame_embeds, rewards, mask = video_mask)
 
         return loss
