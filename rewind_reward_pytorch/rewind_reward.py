@@ -194,6 +194,8 @@ class RewardModel(Module):
 
         # determine video masking for loss
 
+        video_mask = None
+
         if exists(video_lens):
             video_mask = mask_from_lens(video_lens)
             max_video_len = video_lens.amax().item()
