@@ -27,8 +27,10 @@ def test_categorical_rewind_reward(
     assert logits.shape == (2, 16, 10)
 
 @param('token_embed', (False, True))
+@param('use_extra_embed_tokens', (False, True))
 def test_rewind_reward(
-    token_embed
+    token_embed,
+    use_extra_embed_tokens
 ):
     from rewind_reward_pytorch.rewind_reward import RewardModel
 
@@ -45,9 +47,14 @@ def test_rewind_reward(
 
     video = torch.rand(2, 3, 16, 224, 224)
 
+    extra_embed_tokens = None
+    if use_extra_embed_tokens:
+        extra_embed_tokens = torch.randn(2, 7, 768)
+
     loss = reward_model(
         commands,
         video,
+        extra_embed_tokens = extra_embed_tokens,
         video_lens = torch.randint(5, 16, (2,)),
         rewards = torch.randn((2, 16))
     )

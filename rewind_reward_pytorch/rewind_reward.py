@@ -141,7 +141,8 @@ class RewardModel(Module):
     def forward(
         self,
         commands: list[str],
-        video, # (b c t h w)
+        video,                        # (b c t h w)
+        extra_embed_tokens = None,    # (b n d)
         rewards = None,
         video_lens = None
     ):
@@ -150,6 +151,10 @@ class RewardModel(Module):
 
         device = video.device
         mask = None
+
+        # register tokens
+
+        register_tokens = repeat(self.register_tokens, 'n d -> b n d', b = batch)
 
         # language embed
 
@@ -165,6 +170,14 @@ class RewardModel(Module):
             lens = tensor([t.shape[0] for t in lang_embeds], device = device)
             mask = mask_from_lens(lens)
 
+        # extra embeds, whether they be RGBD (Adapt3R tokens) or Tactile tokens
+
+        if not exists(extra_embed_tokens):
+            extra_embed_tokens = register_tokens[:, 0:0] # easy way to create an empty (b 0 d) tensor
+
+        elif exists(extra_embed_tokens) and exists(mask):
+            mask = F.pad(mask, (0, extra_embed_tokens.shape[-2]), value = True)
+
         # video embeds
 
         video_embeds = self.video_embed(video, eval_with_no_grad = True)
@@ -176,11 +189,11 @@ class RewardModel(Module):
 
         lang_tokens = self.to_lang_tokens(lang_embeds)
 
-        register_tokens = repeat(self.register_tokens, 'n d -> b n d', b = batch)
-
         video_tokens = self.to_video_tokens(video_embeds)
 
-        tokens, lang_video_packed_shape = pack((lang_tokens, register_tokens, video_tokens), 'b * d')
+        # pack all tokens for attention
+
+        tokens, lang_video_packed_shape = pack((lang_tokens, register_tokens, extra_embed_tokens, video_tokens), 'b * d')
 
         # attention
 
@@ -188,7 +201,7 @@ class RewardModel(Module):
 
         # unpack and project the video tokens to logits to train reward predictor
 
-        _, _, attended_video_tokens = unpack(attended, lang_video_packed_shape, 'b * d')
+        _, _, _, attended_video_tokens = unpack(attended, lang_video_packed_shape, 'b * d')
 
         video_frame_embed_or_logits = self.mlp_predictor(attended_video_tokens)
 
