@@ -284,9 +284,11 @@ class RewindTrainWrapper(Module):
         if not exists(video_lens):
             video_lens = torch.full((batch,), max_video_len, device = device).float()
 
+        assert (video_lens >= 2).all(), 'you have an invalid single frame video in here'
+
         video_frame_seq = torch.arange(max_video_len, device = device)
 
-        forward_progress = einx.divide('n, b -> b n', video_frame_seq, video_lens)
+        forward_progress = einx.divide('n, b -> b n', video_frame_seq, video_lens - 1.)
 
         loss = self.reward_model(
             commands = commands,
