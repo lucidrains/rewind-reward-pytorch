@@ -2,7 +2,7 @@ from __future__ import annotations
 from itertools import chain
 
 import torch
-from torch import nn, tensor
+from torch import nn, cat, tensor
 from torch.nn import Module
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pad_sequence
@@ -86,15 +86,13 @@ class RewardModel(Module):
         if not exists(image_model):
             image_model = DinoImageEmbedder()
 
-        self.video_embed = AcceptVideoWrapper(
-            image_model,
-            add_time_pos_emb = True,
-            time_seq_len = max_video_frames,
-            dim_emb = dim_image_embed
-        )
+        self.video_embed = AcceptVideoWrapper(image_model)
+
 
         self.encoder = Encoder(**encoder)
         dim = self.encoder.dim
+
+        self.first_pos_emb = nn.Parameter(torch.randn(dim) * 1e-2) # only first frame gets a positional embed, so it cannot cheat on predicting progress
 
         self.to_lang_tokens = nn.Linear(mini_lm_dim, dim)
 
@@ -190,6 +188,14 @@ class RewardModel(Module):
         lang_tokens = self.to_lang_tokens(lang_embeds)
 
         video_tokens = self.to_video_tokens(video_embeds)
+
+        # add video start positional embedding
+
+        first_video_token, rest_video_tokens = video_tokens[:, :1], video_tokens[:, 1:]
+
+        first_video_token = first_video_token + repeat(self.first_pos_emb, 'd -> b 1 d', b = batch)
+
+        video_tokens = cat((first_video_token, rest_video_tokens), dim = 1)
 
         # pack all tokens for attention
 
