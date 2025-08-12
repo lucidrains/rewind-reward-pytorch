@@ -64,3 +64,27 @@ def test_rewind_reward(
     pred = reward_model(commands, video)
 
     assert pred.shape == (2, 16)
+
+def test_rewind_wrapper():
+    from rewind_reward_pytorch.rewind_reward import RewardModel, RewindTrainWrapper
+
+    reward_model = RewardModel(
+        categorical_rewards = False
+    )
+
+    commands = [
+      'pick up the blue ball and put it in the red tray',
+      'pick up the red cube and put it in the green bin',
+    ]
+
+    video = torch.rand(2, 3, 16, 224, 224)
+
+    train_wrapper = RewindTrainWrapper(reward_model)
+
+    loss = train_wrapper(
+        commands,
+        video,
+        video_lens = torch.randint(5, 16, (2,)),
+    )
+
+    loss.backward()
