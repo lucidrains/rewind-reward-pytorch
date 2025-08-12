@@ -73,7 +73,7 @@ class RewardModel(Module):
         categorical_rewards = False,
         use_hl_gauss_loss = True,
         reward_min_value = 0.,
-        reward_max_value = 5.,
+        reward_max_value = 1.,
         reward_hl_gauss_loss_num_bins = 20,
     ):
         super().__init__()
@@ -257,5 +257,42 @@ class RewardModel(Module):
             assert rewards.dtype == torch.float
 
             loss = self.hl_gauss_layer(video_frame_embeds, rewards, mask = video_mask)
+
+        return loss
+
+# rewind wrapper
+
+class RewindTrainWrapper(Module):
+    def __init__(
+        self,
+        reward_model: RewardModel,
+    ):
+        super().__init__()
+        assert not reward_model.categorical_rewards
+
+        self.reward_model = reward_model
+
+    def forward(
+        self,
+        commands: list[str],
+        video,                        # (b c t h w)
+        extra_embed_tokens = None,    # (b n d)
+        video_lens = None
+    ):
+        batch, max_video_len, device = video.shape[0], video.shape[2], video.device
+
+        if not exists(video_lens):
+            video_lens = torch.full((batch,), max_video_len, device = device).float()
+
+        video_frame_seq = torch.arange(max_video_len, device = device)
+
+        forward_progress = einx.divide('n, b -> b n', video_frame_seq, video_lens)
+
+        loss = self.reward_model(
+            commands = commands,
+            video = video,
+            video_lens = video_lens,
+            rewards = forward_progress
+        )
 
         return loss
