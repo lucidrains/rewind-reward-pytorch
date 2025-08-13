@@ -56,7 +56,7 @@ class DinoImageEmbedder(Module):
 class RewardModel(Module):
     def __init__(
         self,
-        encoder: dict | Encoder = dict(
+        decoder: dict | Decoder = dict(
             dim = 768,
             depth = 4,
             heads = 8,
@@ -89,8 +89,8 @@ class RewardModel(Module):
         self.video_embed = AcceptVideoWrapper(image_model)
 
 
-        self.encoder = Encoder(**encoder)
-        dim = self.encoder.dim
+        self.decoder = Decoder(**decoder)
+        dim = self.decoder.dim
 
         self.first_pos_emb = nn.Parameter(torch.randn(dim) * 1e-2) # only first frame gets a positional embed, so it cannot cheat on predicting progress
 
@@ -128,7 +128,7 @@ class RewardModel(Module):
 
     def parameters(self):
         return chain(
-            self.encoder.parameters(),
+            self.decoder.parameters(),
             iter((self.video_embed.pos_emb,)),
             self.to_lang_tokens.parameters(),
             self.to_video_tokens.parameters(),
@@ -203,7 +203,7 @@ class RewardModel(Module):
 
         # attention
 
-        attended = self.encoder(tokens, mask = mask)
+        attended = self.decoder(tokens, mask = mask)
 
         # unpack and project the video tokens to logits to train reward predictor
 
