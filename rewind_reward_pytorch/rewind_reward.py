@@ -1,5 +1,6 @@
 from __future__ import annotations
 from itertools import chain
+from random import random
 
 import torch
 from torch import nn, cat, tensor
@@ -27,10 +28,20 @@ from einops import rearrange, repeat, pack, unpack
 def exists(v):
     return v is not None
 
+def satisfy_prob(prob):
+    return random() < prob
+
 def mask_from_lens(lens):
     seq = torch.arange(lens.amax().item(), device = lens.device)
     mask = einx.less('n, b -> b n', seq, lens)
     return mask
+
+def randint(
+    min_value: int,
+    max_value: Tensor
+):
+    value_range = (max_value - min_value).float()
+    return ((value_range * torch.rand_like(value_range)) + min_value).round().clamp(min = min_value).long()
 
 # their main proposal is just in Figure 9
 # basically the gist is predict progress from video frames for dense rewards
@@ -266,11 +277,14 @@ class RewindTrainWrapper(Module):
     def __init__(
         self,
         reward_model: RewardModel,
+        rewind_augmentation_prob = 0.5
     ):
         super().__init__()
         assert not reward_model.categorical_rewards
 
         self.reward_model = reward_model
+
+        self.rewind_augmentation_prob = rewind_augmentation_prob
 
     def forward(
         self,
@@ -288,13 +302,45 @@ class RewindTrainWrapper(Module):
 
         video_frame_seq = torch.arange(max_video_len, device = device)
 
-        forward_progress = einx.divide('n, b -> b n', video_frame_seq, video_lens - 1.)
+        progress = einx.divide('n, b -> b n', video_frame_seq, video_lens - 1.)
+
+        if satisfy_prob(self.rewind_augmentation_prob):
+
+            rand_index = randint(2, video_lens)
+            rewind_len = randint(1, rand_index - 1)
+
+            video_lens = rand_index + rewind_len # the video lens are now up to that selected random index (i in paper) with the rewind length (k in paper)
+
+            video_seq = torch.arange(max_video_len, device = device)
+            reversed_video_seq = video_seq.flip(dims = (-1,))
+
+            frame_indices = cat((video_seq, reversed_video_seq[1:]))
+
+            aug_max_video_len = video_lens.amax().item()
+
+            seq = torch.arange(aug_max_video_len, device = device)
+
+            indices = einx.add('b, n -> b n', max_video_len - rand_index, seq)
+
+            sel_indices_offsetted = frame_indices[indices]
+            sel_frame_indices = einx.subtract('b n, b', sel_indices_offsetted, sel_indices_offsetted[:, 0])
+
+            sel_frame_indices.clamp_(min = 0)
+
+            batch_arange = torch.arange(batch, device = device)[:, None]
+
+            video = rearrange(video, 'b c t ... -> b t c ...')
+            video = video[batch_arange, sel_frame_indices]
+            video = rearrange(video, 'b t c ... -> b c t ...')
+
+            # i think it comes out to the same as just selecting out the forward progress from above, but please open an issue if not
+            progress = progress[batch_arange, sel_frame_indices]
 
         loss = self.reward_model(
             commands = commands,
             video = video,
             video_lens = video_lens,
-            rewards = forward_progress
+            rewards = progress
         )
 
         return loss
