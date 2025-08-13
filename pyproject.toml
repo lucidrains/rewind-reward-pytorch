@@ -1,6 +1,6 @@
 [project]
 name = "rewind-reward-pytorch"
-version = "0.0.19"
+version = "0.0.20"
 description = "Rewind Reward"
 authors = [
     { name = "Phil Wang", email = "lucidrains@gmail.com" }
