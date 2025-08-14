@@ -291,7 +291,8 @@ class RewindTrainWrapper(Module):
         commands: list[str],
         video,                        # (b c t h w)
         extra_embed_tokens = None,    # (b n d)
-        video_lens = None
+        video_lens = None,
+        return_maybe_augmented = True
     ):
         batch, max_video_len, device = video.shape[0], video.shape[2], video.device
 
@@ -304,7 +305,9 @@ class RewindTrainWrapper(Module):
 
         progress = einx.divide('n, b -> b n', video_frame_seq, video_lens - 1.)
 
-        if satisfy_prob(self.rewind_augmentation_prob):
+        is_rewind_augmented = satisfy_prob(self.rewind_augmentation_prob)
+
+        if is_rewind_augmented:
 
             rand_index = randint(2, video_lens)
             rewind_len = randint(1, rand_index - 1)
@@ -343,4 +346,7 @@ class RewindTrainWrapper(Module):
             rewards = progress
         )
 
-        return loss
+        if not return_maybe_augmented:
+            return loss
+
+        return loss, (is_rewind_augmented, video, video_lens, progress)
