@@ -292,7 +292,7 @@ class RewindTrainWrapper(Module):
         video,                        # (b c t h w)
         extra_embed_tokens = None,    # (b n d)
         video_lens = None,
-        return_maybe_augmented = True
+        return_maybe_augmented = False
     ):
         batch, max_video_len, device = video.shape[0], video.shape[2], video.device
 
@@ -337,6 +337,7 @@ class RewindTrainWrapper(Module):
             video = rearrange(video, 'b t c ... -> b c t ...')
 
             # i think it comes out to the same as just selecting out the forward progress from above, but please open an issue if not
+
             progress = progress[batch_arange, sel_frame_indices]
 
         loss = self.reward_model(
@@ -348,5 +349,14 @@ class RewindTrainWrapper(Module):
 
         if not return_maybe_augmented:
             return loss
+
+        if is_rewind_augmented:
+            # mask out, even if the reward model is already doing it automatically
+            # for introspecting on the augmentations
+
+            video_mask = einx.less('t, b -> b t', seq, video_lens)
+
+            video = einx.where('b t, b c t ...,', video_mask, video, 0.)
+            progress = einx.where('b t, b t,', video_mask, progress, -1.)
 
         return loss, (is_rewind_augmented, video, video_lens, progress)
