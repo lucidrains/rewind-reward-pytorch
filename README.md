@@ -17,26 +17,46 @@ $ pip install rewind-reward-pytorch
 
 ```python
 import torch
-from rewind_reward_pytorch import RewardModel
 
-reward_model = RewardModel()
+from rewind_reward_pytorch import (
+    RewardModel,
+    RewindTrainWrapper
+)
+
+reward_model = RewardModel(
+    reward_bins = 10,
+    categorical_rewards = False,
+
+)
+
+wrapper = RewindTrainWrapper(
+    reward_model,
+    rewind_augmentation_prob = 0.25
+)
 
 commands = [
   'pick up the blue ball and put it in the red tray',
-  'pick up the red cube and put it in the green bin'
+  'pick up the red cube and put it in the green bin',
 ]
 
-videos = torch.rand(2, 3, 16, 224, 224)
+video = torch.rand(2, 3, 16, 224, 224)
 
-loss = reward_model(commands, videos, rewards = torch.randn(2, 16))
+loss = wrapper(
+    commands,
+    video
+)
 
 loss.backward()
 
 # after much training
 
-pred = reward_model(commands, videos)
+pred_rewards = reward_model(
+    commands,
+    video
+) # (2, 16) - per frame progress prediction
 
-assert pred.shape == (2, 16)
+assert pred_rewards.shape == (2, 16)
+
 ```
 
 ## Citations

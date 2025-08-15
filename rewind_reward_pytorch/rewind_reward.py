@@ -297,7 +297,7 @@ class RewindTrainWrapper(Module):
         batch, max_video_len, device = video.shape[0], video.shape[2], video.device
 
         if not exists(video_lens):
-            video_lens = torch.full((batch,), max_video_len, device = device).float()
+            video_lens = torch.full((batch,), max_video_len, device = device, dtype = torch.long)
 
         assert (video_lens >= 2).all(), 'you have an invalid single frame video in here'
 
